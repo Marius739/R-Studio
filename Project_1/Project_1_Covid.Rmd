@@ -1,0 +1,390 @@
+---
+title : "Modelling excess covid death in France"
+---
+# Preliminaries
+*import the packages that we need*
+
+```{r, results = "hide", message=FALSE} 
+library(tidyverse)
+library(lubridate)
+library(aweek)
+library(gridExtra)
+library(ggplot2)
+```
+
+## Function to download OWID data
+*This function download the OWID data of the specified country*
+
+```{r}
+download_owid_data <- function(country_code) {
+  if (country_code == "France") {
+    owid_url <- "https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/jhu/new_deaths.csv"
+  } else {
+    owid_url <- "https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/jhu/new_deaths.csv"
+  }
+  
+  owid_data <- read_csv(owid_url) %>%
+    select(date, !!country_code) %>%
+    mutate(!!country_code := ifelse(is.na(!!rlang::sym(country_code)), 0, !!rlang::sym(country_code))) %>%
+    mutate(cdeath2 = cumsum(!!rlang::sym(country_code))) %>%
+    rename(deaths2 = !!country_code)
+  
+  return(owid_data)
+}
+```
+
+```{r, results = "hide"}
+owid_data_FRA <- download_owid_data("France")
+```
+
+## Function to download JHU data
+*This function download the JHU data of the specified country*
+
+```{r}
+download_jhu_data <- function(country_name) {
+  jhu_url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv"
+  jhu_data <- read_csv(jhu_url)
+  
+  jhu_data <- jhu_data %>%
+    rename(Country = `Country/Region`)
+  
+  jhu_data <- jhu_data %>%
+    filter(Country == country_name)
+  
+  jhu_data <- jhu_data %>%
+    select(-Lat, -Long)
+  
+  jhu_data <- jhu_data %>%
+    pivot_longer(cols = -(1:2), names_to = "date", values_to = "cdeaths") %>%
+    mutate(date = as.Date(date, tryFormats = c("%m/%d/%Y"))) %>%
+    mutate(date = date + dyears(2000) - ddays(15)) %>%
+    group_by(date) %>%
+    summarise(cdeaths = sum(cdeaths)) %>%
+    ungroup() %>%
+    mutate(death = cdeaths - lag(cdeaths))
+  
+  return(jhu_data)
+}
+```
+
+```{r, results = "hide"}
+jhu_data_France <- download_jhu_data("France")
+```
+
+## Daily deaths for JHU and OWID
+*This code compute the daily deaths for OWID and JHU data frames and plot a graphic*
+
+```{r, warning=FALSE}
+daily_deaths_JHU <- jhu_data_France$death
+
+daily_deaths_OWID <- owid_data_FRA$deaths2
+
+comparison_data <- data.frame(
+  Date = jhu_data_France$date,
+  JHU_Daily_Deaths = daily_deaths_JHU,
+  OWID_Daily_Deaths = daily_deaths_OWID
+)
+
+ggplot(comparison_data, aes(x = Date)) +
+  geom_line(aes(y = JHU_Daily_Deaths, color = "JHU"), linetype = "solid") +
+  geom_line(aes(y = OWID_Daily_Deaths, color = "OWID"), linetype = "dashed") +
+  labs(title = "Comparaison des Décès Quotidiens (France)",
+       y = "Nombre de Décès Quotidiens",
+       color = "Source") +
+  scale_color_manual(values = c("JHU" = "blue", "OWID" = "red")) +
+  theme_minimal()
+```
+
+## Cumuluative deaths for JHU and OWID data
+*This code compute the cumulative deaths for OWID and JHU data frames and plot a graphic*
+
+```{r}
+cumulative_deaths_JHU <- jhu_data_France$cdeaths
+
+cumulative_deaths_OWID <- owid_data_FRA$cdeath2
+
+comparison_data_cumulative <- data.frame(
+  Date = jhu_data_France$date,
+  JHU_Cumulative_Deaths = cumulative_deaths_JHU,
+  OWID_Cumulative_Deaths = cumulative_deaths_OWID
+)
+
+ggplot(comparison_data_cumulative, aes(x = Date)) +
+  geom_line(aes(y = JHU_Cumulative_Deaths, color = "JHU"), linetype = "solid") +
+  geom_line(aes(y = OWID_Cumulative_Deaths, color = "OWID"), lty = 2, lwd = 2) +
+  labs(title = "Cumulative death in France",
+       y = "Death count",
+       color = "Source") +
+  scale_color_manual(values = c("JHU" = "black", "OWID" = "red")) +
+  guides(color = guide_legend(title = NULL))
+  
+
+```
+
+## Function to compute the population
+*This function compute the population of a country with the OWID covid dataset*
+
+```{r}
+get_population_from_owid <- function(country_name) {
+  owid_population_url <- "https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/owid-covid-data.csv"
+  owid_population_data <- owid_population_url %>%
+    url() %>%
+    read_csv()
+  
+  population <- owid_population_data %>%
+    filter(location == country_name) %>%
+    select(population)
+  
+  return(population)
+}
+```
+
+```{r, results = "hide"}
+population_France <- get_population_from_owid("France")
+```
+
+## Function to download mortality data
+*This function download the mortality data set*
+
+```{r}
+download_mortality_data <- function(country_iso3c) {
+  world_mort_url <- "https://raw.githubusercontent.com/akarlinsky/world_mortality/main/world_mortality.csv"
+  
+  mortality_data <- world_mort_url %>%
+    url() %>%
+    read_csv()
+  
+  country_mortality_data <- mortality_data %>%
+    filter(iso3c == country_iso3c)
+  
+  return(country_mortality_data)
+}
+```
+
+```{r, results = "hide"}
+mortality_France <- download_mortality_data("FRA")
+```
+
+```{r}
+mortality_France %>%
+    select(-c(iso3c,country_name,time_unit)) %>%
+    rename(mortality=deaths, week=time) ->
+    mortality_France
+```
+
+## Weekly deaths for France
+*We compute weekly deaths for France*
+
+```{r, results = "hide", message=FALSE}
+owid_data_FRA <- owid_data_FRA %>%
+  mutate(date = as.Date(date))
+
+owid_data_weekly <- owid_data_FRA %>%
+  group_by(year = lubridate::year(date), week = lubridate::isoweek(date)) %>%
+  summarize(deaths = sum(deaths2))
+```
+
+```{r}
+owid_data_weekly
+```
+
+```{r}
+owid_data_weekly <- inner_join(owid_data_weekly,
+                                 mortality_France, by=c("year", "week") )
+
+owid_data_weekly %>%
+    mutate(start_date = get_date(week=week,year=year)) ->
+    owid_data_weekly
+
+tail(owid_data_weekly)
+```
+
+```{r}
+population_France_constante <- unique(population_France$population)
+
+owid_data_weekly <- owid_data_weekly %>%
+  mutate(deaths_per_100k = (deaths / population_France_constante) * 100000)
+
+tail(owid_data_weekly)
+```
+
+*We have created a new object for the population, since it is constant and makes calculations easier*
+*So we can plot two graphs*
+
+```{r, figures-side, fig.show="hold", out.width="75%"}
+p1 <- ggplot(owid_data_weekly, aes(x=start_date))+
+  geom_line(aes(y = deaths_per_100k), lwd = 0.7)+
+  ggtitle("France covid deaths per 100 thousand")+
+  labs(x="date", y="death count")
+
+p2 <- ggplot(owid_data_weekly, aes(x=start_date))+
+  geom_line(aes(y = mortality), lwd = 0.7) +
+  ggtitle("France : weekly mortality (all causes)")+
+  labs(x="date", y="death count")
+
+print(p1)
+print(p2)
+```
+
+## Function to compute excess deaths
+*We use an OLS model to estimate excess deaths in France. The model is modf <- mortality ~ year + factor(week)*
+
+```{r}
+mortality_France <- mortality_France %>%
+  mutate(start_date = as.Date(paste(year, "01-01"), format = "%Y %d-%m") + weeks(week - 1))
+```
+
+```{r}
+get_excess_deaths <- function(mortality_data, start_date = "2020-03-01") {
+  modf <- mortality ~ year + factor(week) 
+  
+  ts_model <- lm(modf, data = mortality_data, subset = start_date <= "2020-03-01")
+
+  mortality_data_filtered <- mortality_data[mortality_data$start_date >= start_date, ]
+  
+  predicted_deaths <- predict(ts_model, newdata = mortality_data_filtered)
+
+  excess_deaths <- mortality_data_filtered$mortality - predicted_deaths
+
+  excess_deaths_per_100k <- (excess_deaths / population_France_constante) * 100000
+
+  mortality_data_filtered$excess_deaths <- excess_deaths
+  mortality_data_filtered$excess_deaths_per_100k <- excess_deaths_per_100k
+
+  return(mortality_data_filtered)
+}
+```
+
+```{r}
+mortality_France_with_excess <- get_excess_deaths(mortality_France)
+```
+
+*So we can plot two graphs to illustrate*
+
+```{r, figures_side, fig.show='hold', out.width="75%"}
+p3 <- ggplot() +
+  geom_line(data = owid_data_weekly, aes(x = start_date, y = deaths, color = "covid")) +
+  geom_line(data = mortality_France_with_excess, aes(x = start_date, y = excess_deaths, color = "excess deaths")) +
+  labs(
+    title = "France : covid registred v. excess deaths",
+    x = "date",
+    y = "death count"
+  ) +
+  scale_color_manual(values = c("covid" = "black", "excess deaths" = "red"))+
+  guides(color = guide_legend(title = NULL)) +
+  theme(legend.position = "bottom")
+
+p4 <- ggplot() +
+  geom_line(data = owid_data_weekly, aes(x = start_date, y = deaths_per_100k, color = "covid")) +
+  geom_line(data = mortality_France_with_excess, aes(x = start_date, y = excess_deaths_per_100k, color = "excess deaths")) +
+  labs(
+    title = "France : covid registred v. excess deaths per 100 thousand",
+    x = "date",
+    y = "death count"
+  ) +
+  scale_color_manual(values = c("covid" = "black", "excess deaths" = "red")) + 
+  guides(color = guide_legend(title = NULL)) + 
+  theme(legend.position = "bottom")
+
+print(p3)
+print(p4)
+```
+
+# Country-level analysis
+*We now turn our attention to Germany, and apply our functions and have graphs and be able to compare France and Germany*
+
+*We use previous functions to get all the data that we need*
+
+```{r}
+owid_data_GER <- download_owid_data("Germany")
+```
+
+```{r}
+mortality_Germany <- download_mortality_data("DEU")
+```
+
+```{r}
+population_Germany <- get_population_from_owid("Germany")
+population_Germany_constante <- unique(population_Germany$population)
+```
+
+*Now we do some arrangements in the data*
+
+```{r, results='hide', message=FALSE}
+owid_data_GER <- owid_data_GER %>%
+  mutate(date = as.Date(date))
+
+owid_data_GER_weekly <- owid_data_GER %>%
+  group_by(year = lubridate::year(date), week = lubridate::isoweek(date)) %>%
+  summarize(deaths = sum(deaths2))
+```
+
+```{r}
+owid_data_GER_weekly
+```
+
+```{r}
+mortality_Germany <- mortality_Germany %>%
+  select(-iso3c, -country_name, -time_unit)
+```
+
+```{r}
+mortality_Germany <- mortality_Germany %>%
+  rename(week = time)
+```
+
+```{r}
+mortality_Germany <- mortality_Germany %>%
+  rename(mortality = deaths)
+```
+
+```{r}
+owid_data_GER_weekly <- owid_data_GER_weekly %>%
+  mutate(start_date = as.Date(paste(year, "01-01"), format = "%Y %d-%m") + weeks(week - 1))
+```
+
+```{r}
+mortality_Germany <- mortality_Germany %>%
+  mutate(start_date = as.Date(paste(year, "01-01"), format = "%Y %d-%m") + weeks(week - 1))
+```
+
+*So now we can use this functions*
+
+```{r}
+mortality_Germany_with_excess <- get_excess_deaths(mortality_Germany)
+```
+
+*And we can plot some graphs*
+
+```{r}
+p5 <- ggplot() +
+  geom_line(data = owid_data_GER_weekly, aes(x = start_date, y = deaths, color = "covid")) + 
+  geom_line(data = mortality_Germany_with_excess, aes(x = start_date, y = excess_deaths, color = "excess deaths")) +
+  labs(
+    title = "Germany : covid registred v. excess deaths",
+    x = "date",
+    y = "death count" 
+  ) +
+  scale_color_manual(values = c("covid" = "black", "excess deaths" ="red")) +
+  guides(color = guide_legend(title = NULL)) + 
+  theme(legend.position = "bottom")
+  
+print(p5)
+```
+
+# Comparison: excess deaths per 100k
+
+```{r}
+p6 <- ggplot() +
+  geom_line(data = mortality_France_with_excess, aes(x = start_date, y = excess_deaths_per_100k, color = "France")) + 
+  geom_line(data = mortality_Germany_with_excess, aes(x = start_date, y = excess_deaths_per_100k, color = "Germany")) +
+  labs(
+    title = "Excess deaths per 100 thousand : France and Germany",
+    x = "date",
+    y = "death count" 
+  ) +
+  scale_color_manual(values = c("France" = "black", "Germany" ="red")) +
+  guides(color = guide_legend(title = NULL)) + 
+  theme(legend.position = "bottom")
+print(p6)
+```

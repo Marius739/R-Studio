@@ -1,0 +1,81 @@
+## Data wrangling: Working with IPUMS in R
+*we import the libraires we'll use*
+```{r, message=FALSE}
+library(tidyverse)
+library(ipumsr)
+
+ddi <- read_ipums_ddi("usa_00004.xml")
+dat80 <- read_ipums_micro(ddi, data_file = "usa_00004.dat")
+
+```
+
+```{r}
+file.info("usa_00004.xml")$size/ 1e3
+```
+```{r}
+file.info("usa_00004.dat")$size/ 1e9
+```
+```{r}
+dat80
+```
+```{r}
+dat80 %>%
+    filter(SEX == 1,  BIRTHYR >= 1930 & BIRTHYR < 1940,
+           INCWAGE > 0,  WKSWORK1>0, RACE == 1 | RACE == 2) %>%
+    mutate(YEAR:=NULL, SAMPLE:=NULL, GQ:=NULL, RACED:=NULL,
+           RACE:=NULL, SEX:=NULL)  ->
+    dat80
+```
+
+```{r}
+dat80 %>%
+    mutate(LWKLYWGE = log(INCWAGE / WKSWORK1)) %>%
+    mutate(INCWAGE:=NULL,WKSWORK1:=NULL) %>%
+    mutate(EDUC = NA) %>%
+    mutate(EDUC = ifelse(EDUCD == 14, 1, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 15, 2, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 16, 3, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 17, 4, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 22, 5, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 23, 6, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 25, 7, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 26, 8, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 30, 9, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 40, 10, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 50, 11, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 60, 12, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 65 | EDUCD == 70, 13, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 80, 14, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 90, 15, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 100, 16, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 110, 17, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 111, 18, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD == 112, 19, EDUC)) %>%
+    mutate(EDUC = ifelse(EDUCD >= 113, 20, EDUC)) %>%
+    mutate(EDUCD := NULL) ->
+    dat80
+```
+
+```{r}
+glimpse(dat80)
+```
+*We can plot some graphs now*
+```{r, warning=FALSE, figures-side, fig.show='hold', out.width="50%"}
+p1 <- ggplot(dat80, aes(x = LWKLYWGE)) +
+  geom_histogram(binwidth = 0.1, fill = "blue", color = "black") +
+  labs(title = "The distribution of log weekly wages",
+       x = "Log Weekly Wages",
+       y = "Number of individuals")
+
+p2 <- ggplot(dat80, aes(x = EDUC)) +
+  geom_bar(fill = "green", color = "black") +
+  labs(title = "The distribution of educational attainment",
+       x = "Education level",
+       y = "Number of individuals")
+print(p1)
+print(p2)
+```
+
+```{r}
+summary(lm(LWKLYWGE ~ EDUC + factor(BIRTHYR), data=dat80))
+```
